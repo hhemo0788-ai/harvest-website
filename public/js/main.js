@@ -24,10 +24,9 @@ async function fetchLastUpdated() {
             // new Date("2026-02-05 14:00:00") treates as local time in some browsers?
             // Let's assume it's UTC for consistency or just format it as is.
 
-            const dateObj = new Date(data.last_updated.replace(' ', 'T') + 'Z'); // Explicit UTC
+            const dateObj = new Date(data.last_updated);
 
             if (!isNaN(dateObj)) {
-                // Formatter: Date + Time
                 const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
                 document.getElementById('lastUpdated').textContent = `آخر تحديث للقائمة: ${dateObj.toLocaleDateString('ar-EG', options)}`;
             }

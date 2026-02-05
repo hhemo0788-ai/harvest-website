@@ -2,9 +2,17 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const session = require('express-session');
 const path = require('path');
-const bcrypt = require('bcryptjs');
 const multer = require('multer');
-const db = require('./database');
+const fs = require('fs');
+
+// LowDB Setup
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
+const adapter = new FileSync(path.join(__dirname, 'data', 'db.json'));
+const db = low(adapter);
+
+// Initialize DB Defaults
+db.defaults({ products: [], admins: [] }).write();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,10 +20,14 @@ const PORT = process.env.PORT || 3000;
 // Configure Multer for Image Uploads
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, 'public/uploads/');
+        const uploadPath = 'public/uploads/';
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+        cb(null, uploadPath);
     },
     filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname)); // Append extension
+        cb(null, Date.now() + path.extname(file.originalname));
     }
 });
 const upload = multer({ storage: storage });
@@ -25,11 +37,11 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'secret-harvest-key',
+    secret: process.env.SESSION_SECRET || 'harvest-secret-key',
     resave: false,
     saveUninitialized: true,
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+        secure: process.env.NODE_ENV === 'production',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
@@ -45,22 +57,17 @@ const isAuthenticatedAdmin = (req, res, next) => {
 
 // --- API Routes ---
 
-// Login
+// Login (Simple Plain-text for now as requested)
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const user = db.get('admins').find({ username: username, password: password }).value();
 
-        bcrypt.compare(password, user.password, (err, result) => {
-            if (result) {
-                req.session.user = { id: user.id, username: user.username, role: user.role };
-                res.json({ success: true, role: user.role });
-            } else {
-                res.status(401).json({ error: 'Invalid credentials' });
-            }
-        });
-    });
+    if (user) {
+        req.session.user = { id: user.id, username: user.username, role: 'admin' };
+        res.json({ success: true, role: 'admin' });
+    } else {
+        res.status(401).json({ error: 'Invalid credentials' });
+    }
 });
 
 // Logout
@@ -77,101 +84,84 @@ app.get('/api/session', (req, res) => {
 // GET Products (Public)
 app.get('/api/products', (req, res) => {
     const { search, category } = req.query;
-    let query = "SELECT * FROM products WHERE 1=1";
-    let params = [];
+    let products = db.get('products').value();
 
     if (search) {
-        query += " AND (name LIKE ? OR active_ingredient LIKE ?)";
-        params.push(`%${search}%`, `%${search}%`);
+        const lowerSearch = search.toLowerCase();
+        products = products.filter(p =>
+            (p.name && p.name.toLowerCase().includes(lowerSearch)) ||
+            (p.active_ingredient && p.active_ingredient.toLowerCase().includes(lowerSearch))
+        );
     }
 
-    if (category) {
+    if (category && category !== 'All') {
         if (category === 'Pesticides') {
-            // Match any category that is NOT 'Fertilizers' (assuming binary main grouping for now, or we could use IN clause)
-            query += " AND category != 'Fertilizers'";
+            products = products.filter(p => p.category !== 'Fertilizers');
         } else if (category === 'Fertilizers') {
-            query += " AND category LIKE '%Fertilizers%'";
-        } else if (category !== 'All') {
-            // Specific pesticide type
-            query += " AND category = ?";
-            params.push(category);
+            products = products.filter(p => p.category && p.category.includes('Fertilizers'));
+        } else {
+            products = products.filter(p => p.category === category);
         }
     }
 
-    if (req.query.sort === 'name') {
-        query += " ORDER BY name ASC";
-    } else {
-        query += " ORDER BY created_at DESC";
-    }
+    // Sort by updated_at or created_at desc
+    products.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
 
-    db.all(query, params, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
+    res.json(products);
 });
 
-// GET Single Product (Public)
+// GET Single Product
 app.get('/api/products/:id', (req, res) => {
-    const sql = `SELECT * FROM products WHERE id = ?`;
-    db.get(sql, [req.params.id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: 'Product not found' });
-        res.json(row);
-    });
+    const product = db.get('products').find({ id: req.params.id }).value();
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    res.json(product);
 });
 
 // POST Product (Admin)
 app.post('/api/products', isAuthenticatedAdmin, upload.single('image'), (req, res) => {
-    const { name, category, description, price, stock, expiration_date, active_ingredient, package_size, origin, carton_size, unit_type } = req.body;
-    const image_url = req.file ? `/uploads/${req.file.filename}` : null;
+    const productData = {
+        ...req.body,
+        id: Date.now().toString(),
+        image_url: req.file ? `/uploads/${req.file.filename}` : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    };
 
-    const sql = `INSERT INTO products (name, category, description, price, stock, expiration_date, active_ingredient, package_size, origin, image_url, carton_size, unit_type, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`;
-    db.run(sql, [name, category, description, price, stock, expiration_date, active_ingredient, package_size, origin, image_url, carton_size, unit_type], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, id: this.lastID });
-    });
+    db.get('products').push(productData).write();
+    res.json({ success: true, id: productData.id });
 });
 
 // PUT Product (Admin)
 app.put('/api/products/:id', isAuthenticatedAdmin, upload.single('image'), (req, res) => {
-    const { name, category, description, price, stock, expiration_date, active_ingredient, package_size, origin, carton_size, unit_type } = req.body;
-    let image_url = req.file ? `/uploads/${req.file.filename}` : undefined;
+    const existing = db.get('products').find({ id: req.params.id }).value();
+    if (!existing) return res.status(404).json({ error: 'Product not found' });
 
-    // Build Dynamic Query based on whether image is updated
-    let sql = `UPDATE products SET name = ?, category = ?, description = ?, price = ?, stock = ?, expiration_date = ?, active_ingredient = ?, package_size = ?, origin = ?, carton_size = ?, unit_type = ?, updated_at = CURRENT_TIMESTAMP`;
-    let params = [name, category, description, price, stock, expiration_date, active_ingredient, package_size, origin, carton_size, unit_type];
-
-    if (image_url) {
-        sql += `, image_url = ?`;
-        params.push(image_url);
+    const updates = { ...req.body, updated_at: new Date().toISOString() };
+    if (req.file) {
+        updates.image_url = `/uploads/${req.file.filename}`;
     }
 
-    sql += ` WHERE id = ?`;
-    params.push(req.params.id);
-
-    db.run(sql, params, function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
+    db.get('products').find({ id: req.params.id }).assign(updates).write();
+    res.json({ success: true });
 });
 
 // DELETE Product (Admin)
 app.delete('/api/products/:id', isAuthenticatedAdmin, (req, res) => {
-    const sql = `DELETE FROM products WHERE id = ?`;
-    db.run(sql, req.params.id, function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
+    db.get('products').remove({ id: req.params.id }).write();
+    res.json({ success: true });
 });
 
 // Get Last Updated Date
 app.get('/api/last-updated', (req, res) => {
-    const sql = `SELECT MAX(CASE WHEN updated_at IS NOT NULL THEN updated_at ELSE created_at END) as last_updated FROM products`;
-    db.get(sql, [], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ last_updated: row ? row.last_updated : null });
-    });
+    const products = db.get('products').value();
+    if (products.length === 0) return res.json({ last_updated: null });
+
+    const latest = products.reduce((max, p) => {
+        const date = new Date(p.updated_at || p.created_at);
+        return date > max ? date : max;
+    }, new Date(0));
+
+    res.json({ last_updated: latest.toISOString() });
 });
 
-// Start Server
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));

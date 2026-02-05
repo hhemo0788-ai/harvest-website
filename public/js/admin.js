@@ -102,8 +102,8 @@ function renderTable() {
                 ${isExpired ? '<br><span style="color:red; font-size: 0.75rem; font-weight:bold;">منتهي</span>' : ''}
             </td>
             <td class="actions-cell">
-                <button class="btn" style="padding: 0.3rem 0.6rem; background: #fbbf24; color: white;" onclick="editProduct(${p.id})">تعديل</button>
-                <button class="btn btn-danger" style="padding: 0.3rem 0.6rem;" onclick="deleteProduct(${p.id})">حذف</button>
+                <button class="btn" style="padding: 0.3rem 0.6rem; background: #fbbf24; color: white;" onclick="editProduct('${p.id}')">تعديل</button>
+                <button class="btn btn-danger" style="padding: 0.3rem 0.6rem;" onclick="deleteProduct('${p.id}')">حذف</button>
             </td>
         `;
         productTable.appendChild(tr);
