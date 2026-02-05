@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تفاصيل المنتج | توزيع الحصاد</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="index.html" class="logo">
+                <span style="color:var(--primary-color)">🌱</span> Harvest Distribution
+            </a>
+            <ul class="nav-links">
+                <li><a href="index.html">الرئيسية</a></li>
+                <li><a href="index.html#products">المنتجات</a></li>
+                <li><a href="#">من نحن</a></li>
+                <li><a href="login.html" class="btn btn-primary" style="padding: 0.4rem 1rem;">دخول المشرف</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Product Details -->
+    <main class="container" style="padding: 4rem 1.5rem;">
+        <div id="product-details-container"
+            style="display: flex; flex-wrap: wrap; gap: 3rem; background: white; padding: 2rem; border-radius: var(--radius); box-shadow: var(--shadow-md);">
+            <div
+                style="flex: 1; min-width: 300px; display: flex; align-items: center; justify-content: center; background: #f9f9f9; border-radius: var(--radius); overflow: hidden;">
+                <!-- Image Wrapper -->
+                <div id="detail-image-wrapper"
+                    style="width: 100%; height: 400px; display: flex; align-items: center; justify-content: center;">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 300px;">
+                <div id="detail-category"
+                    style="color: var(--primary-color); font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 1px;">
+                </div>
+                <h1 id="detail-name" style="font-size: 2.5rem; margin-bottom: 1rem; line-height: 1.2;"></h1>
+
+                <div id="detail-price"
+                    style="font-size: 2rem; font-weight: 700; color: var(--text-dark); margin-bottom: 1.5rem;"></div>
+
+                <div style="margin-bottom: 2rem; line-height: 1.8; color: var(--text-muted);" id="detail-description">
+                </div>
+
+                <div
+                    style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; border-top: 1px solid #eee; padding-top: 1.5rem;">
+                    <div>
+                        <strong id="detail-active-label"
+                            style="display: block; color: var(--text-dark); margin-bottom: 0.2rem;">المادة
+                            الفعالة</strong>
+                        <span id="detail-active"></span>
+                    </div>
+                    <div>
+                        <strong style="display: block; color: var(--text-dark); margin-bottom: 0.2rem;">حجم
+                            العبوة</strong>
+                        <span id="detail-size"></span>
+                    </div>
+                    <div>
+                        <strong style="display: block; color: var(--text-dark); margin-bottom: 0.2rem;">حجم
+                            الكرتونة</strong>
+                        <span id="detail-carton"></span>
+                    </div>
+                    <div>
+                        <strong style="display: block; color: var(--text-dark); margin-bottom: 0.2rem;">المنشأ</strong>
+                        <span id="detail-origin"></span>
+                    </div>
+                    <div>
+                        <strong style="display: block; color: var(--text-dark); margin-bottom: 0.2rem;">حالة
+                            المخزون</strong>
+                        <span id="detail-stock"></span>
+                    </div>
+                    <div>
+                        <strong style="display: block; color: var(--text-dark); margin-bottom: 0.2rem;">تاريخ
+                            الانتهاء</strong>
+                        <span id="detail-expiry"></span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 3rem;">
+                    <button class="btn btn-primary" style="padding: 1rem 2rem; font-size: 1.1rem; width: 100%;"
+                        onclick="alert('اتصل بنا لطلب المنتج!')">اتصل للطلب</button>
+                    <a href="index.html#products"
+                        style="display: block; text-align: center; margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">&larr;
+                        العودة للمنتجات</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer style="background: white; padding: 2rem 0; margin-top: 3rem; border-top: 1px solid #e5e7eb;">
+        <div class="container" style="text-align: center; color: var(--text-muted);">
+            <p>&copy; 2026 شركة الحصاد للتوزيع. جميع الحقوق محفوظة.</p>
+        </div>
+    </footer>
+
+    <script src="js/details.js"></script>
+</body>
+
+</html>

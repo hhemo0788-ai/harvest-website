@@ -1,0 +1,106 @@
+/* Toggle Button Active States */
+.btn-view-active {
+    background-color: var(--primary-color) !important;
+    color: white !important;
+}
+
+.btn-view-inactive {
+    background-color: #e5e7eb !important;
+    color: var(--text-dark) !important;
+}
+
+/* List View Styles */
+.products-grid.view-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.products-grid.view-list .product-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    border: none;
+    border-bottom: 1px solid #e5e7eb;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 1rem 0;
+}
+
+.products-grid.view-list .product-card:hover {
+    transform: none;
+    box-shadow: none;
+    background-color: #f9fafb;
+}
+
+.products-grid.view-list .product-image-container,
+.products-grid.view-list .product-image-placeholder {
+    width: 80px;
+    height: 80px;
+    min-width: 80px;
+    border-radius: var(--radius);
+    margin-right: 1.5rem;
+    font-size: 2rem;
+    /* For emoji icon if no image */
+}
+
+/* Hide Description in List View */
+.products-grid.view-list .card-desc {
+    display: none;
+}
+
+/* Custom Grid for Card Body in List Mode */
+.products-grid.view-list .card-body {
+    padding: 0;
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    align-items: center;
+    width: 100%;
+    gap: 1rem;
+}
+
+.products-grid.view-list .list-col-info {
+    /* Title & Category */
+}
+
+.products-grid.view-list .list-col-details {
+    /* Active Ingredient / Origin */
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.products-grid.view-list .list-col-price {
+    font-weight: bold;
+    color: var(--primary-dark);
+    font-size: 1.1rem;
+}
+
+.products-grid.view-list .list-col-stock {
+    text-align: right;
+}
+
+.products-grid.view-list .expiry-badge {
+    margin-left: 10px;
+    display: inline-block;
+}
+
+/* Responsive List View */
+@media (max-width: 768px) {
+    .products-grid.view-list .card-body {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+
+    .products-grid.view-list .product-image-container,
+    .products-grid.view-list .product-image-placeholder {
+        width: 60px;
+        height: 60px;
+        min-width: 60px;
+    }
+
+    .products-grid.view-list .list-col-details,
+    .products-grid.view-list .list-col-stock {
+        display: none;
+        /* Hide details on very small screens if crowded */
+    }
+}

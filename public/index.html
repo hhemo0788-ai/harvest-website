@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>توزيع الحصاد | Harvest Distribution</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/view-toggle.css">
+</head>
+
+<body>
+
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="index.html" class="logo">
+                <span style="color:var(--primary-color)">🌱</span> Harvest Distribution
+            </a>
+            <ul class="nav-links">
+                <li><a href="#">الرئيسية</a></li>
+                <li><a href="#products">المنتجات</a></li>
+                <li><a href="#">من نحن</a></li>
+                <li><a href="login.html" class="btn btn-primary" style="padding: 0.4rem 1rem;">دخول المشرف</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <header class="hero">
+        <div class="container">
+            <h1>حلول زراعية متميزة</h1>
+            <p>تمكين المزارعين بأفضل المبيدات والأسمدة لمستقبل مستدام.</p>
+            <p id="lastUpdated" style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.8; font-weight: 500;"></p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container" id="products">
+        <div class="search-bar"
+            style="display: flex; gap: 10px; justify-content: center; max-width: 800px; margin: 2rem auto;">
+            <select id="categoryFilter" class="search-input" style="max-width: 200px; cursor: pointer;">
+                <option value="All">الكل</option>
+                <option value="Fertilizers">جميع الأسمدة</option>
+                <option value="Pesticides">جميع المبيدات</option>
+                <optgroup label="أسمدة محددة">
+                    <option value="Fertilizers-NPK">أسمدة NPK</option>
+                    <option value="Fertilizers-Specialized">أسمدة متخصصة</option>
+                    <option value="Fertilizers-GrowthRegulator">منظم نمو</option>
+                    <option value="Fertilizers-SoilConditioner">محسنات تربة</option>
+                </optgroup>
+                <optgroup label="مبيدات محددة">
+                    <option value="Insecticide">مبيد حشري</option>
+                    <option value="Fungicide">مبيد فطري</option>
+                    <option value="Acaricide">مبيد اكاروسي</option>
+                    <option value="Herbicide">مبيد حشائش</option>
+                </optgroup>
+            </select>
+            <input type="text" id="searchInput" class="search-input"
+                placeholder="ابحث باسم المنتج أو المادة الفعالة...">
+        </div>
+
+
+
+        <h2 style="margin-bottom: 1.5rem; font-weight: 700;">منتجاتنا</h2>
+
+        <div id="productGrid" class="products-grid">
+            <!-- Loading State -->
+            <p>جاري تحميل المنتجات...</p>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer style="background: white; padding: 2rem 0; margin-top: 3rem; border-top: 1px solid #e5e7eb;">
+        <div class="container" style="text-align: center; color: var(--text-muted);">
+            <p>&copy; 2026 شركة الحصاد للتوزيع. جميع الحقوق محفوظة.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+
+</html>
