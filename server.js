@@ -203,6 +203,18 @@ app.post('/api/upload-stock-pdf', isAuthenticatedAdmin, upload.single('pdf'), as
     await db.read();
     if (!db.data.settings) db.data.settings = { stock_pdf_url: null };
 
+    // Delete old PDF file if it exists to save space
+    if (db.data.settings.stock_pdf_url) {
+        const oldPath = path.join(__dirname, 'public', db.data.settings.stock_pdf_url);
+        if (fs.existsSync(oldPath)) {
+            try {
+                fs.unlinkSync(oldPath);
+            } catch (err) {
+                console.error("Error deleting old PDF:", err);
+            }
+        }
+    }
+
     const pdfUrl = `/uploads/${req.file.filename}`;
     db.data.settings.stock_pdf_url = pdfUrl;
     await db.write();
