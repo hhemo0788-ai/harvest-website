@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function fetchProductDetails(id) {
     try {
-        const res = await fetch(`/api/products/${id}`);
+        const res = await fetch(`/products/${id}`);
         if (!res.ok) throw new Error('Product not found');
         const product = await res.json();
         renderProductDetails(product);

@@ -49,7 +49,7 @@ async function fetchProducts() {
     const category = categoryFilter.value;
 
     try {
-        let url = `/api/products?search=${encodeURIComponent(query)}&category=${encodeURIComponent(category)}&sort=name`;
+        let url = `/products?search=${encodeURIComponent(query)}&category=${encodeURIComponent(category)}&sort=name`;
         const res = await fetch(url);
         const products = await res.json();
         renderProducts(products);

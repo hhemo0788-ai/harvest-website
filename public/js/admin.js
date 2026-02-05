@@ -67,7 +67,7 @@ async function logout() {
 }
 
 async function fetchAdminProducts() {
-    const res = await fetch('/api/products?sort=name');
+    const res = await fetch('/products?sort=name');
     allProducts = await res.json();
     renderTable();
 }
@@ -244,11 +244,11 @@ async function handleFormSubmit(e) {
         formData.append('image', imageFile);
     }
 
-    let url = '/api/products';
+    let url = '/products';
     let method = 'POST';
 
     if (id) {
-        url = `/api/products/${id}`;
+        url = `/products/${id}`;
         method = 'PUT';
     }
 
@@ -277,7 +277,7 @@ window.editProduct = (id) => {
 window.deleteProduct = async (id) => {
     if (!confirm('هل أنت متأكد من حذف هذا المنتج؟')) return;
 
-    const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/products/${id}`, { method: 'DELETE' });
     if (res.ok) {
         fetchAdminProducts();
     } else {

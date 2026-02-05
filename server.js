@@ -1,36 +1,36 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const session = require('express-session');
-const path = require('path');
-const multer = require('multer');
-const fs = require('fs');
+import express from 'express';
+import bodyParser from 'body-parser';
+import session from 'express-session';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
+import fs from 'fs';
+import { JSONFilePreset } from 'lowdb/node';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // LowDB Setup
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
-const adapter = new FileSync(path.join(__dirname, 'data', 'db.json'));
-const db = low(adapter);
-
-// Initialize DB Defaults
-db.defaults({ products: [], admins: [] }).write();
+const defaultData = { products: [], admins: [] };
+const db = await JSONFilePreset(path.join(__dirname, 'data', 'db.json'), defaultData);
 
 // Ensure hardcoded admin exists in DB
 const adminCredentials = { username: "admin", password: "1234" };
-const existingAdmin = db.get('admins').find({ username: adminCredentials.username }).value();
+await db.read();
+const existingAdmin = db.data.admins.find(a => a.username === adminCredentials.username);
 if (!existingAdmin) {
-    db.get('admins').push({ id: Date.now().toString(), ...adminCredentials }).write();
+    db.data.admins.push({ id: Date.now().toString(), ...adminCredentials });
+    await db.write();
 } else {
-    // Update password if it changed to the requested 1234
-    db.get('admins').find({ username: adminCredentials.username }).assign({ password: adminCredentials.password }).write();
+    existingAdmin.password = adminCredentials.password;
+    await db.write();
 }
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Trust proxy for sessions behind Railway/Heroku/Antigravity
 app.set('trust proxy', 1);
 
-// Configure Multer for Image Uploads
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const uploadPath = 'public/uploads/';
@@ -45,50 +45,43 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(session({
     secret: process.env.SESSION_SECRET || 'harvest-secret-pesticide-key',
     resave: false,
-    saveUninitialized: false, // Changed to false for better session handling
+    saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Helpful for cross-site sessions if needed, but 'lax' is usually fine
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000
     }
 }));
 
-// Auth Middleware
 const isAuthenticatedAdmin = (req, res, next) => {
     if (req.session && req.session.user && req.session.user.role === 'admin') {
         return next();
     }
-    if (req.xhr || req.headers.accept.indexOf('json') > -1) {
+    if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('json') > -1)) {
         res.status(401).json({ error: 'Unauthorized' });
     } else {
         res.redirect('/login.html');
     }
 };
 
-// Route protection for admin.html
 app.get('/admin.html', isAuthenticatedAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// Serve static files AFTER protected routes
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- API Routes ---
 
-// Login
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    // Using hardcoded check as requested, but also checking DB for consistency
     if (username === "admin" && password === "1234") {
         req.session.user = { username: "admin", role: 'admin' };
-        // Explicitly save session to ensure it persists before redirect/response
         req.session.save((err) => {
             if (err) return res.status(500).json({ error: 'Session save error' });
             res.json({ success: true, role: 'admin' });
@@ -98,21 +91,20 @@ app.post('/api/login', (req, res) => {
     }
 });
 
-// Logout
 app.post('/api/logout', (req, res) => {
     req.session.destroy();
     res.json({ success: true });
 });
 
-// Check Session
 app.get('/api/session', (req, res) => {
     res.json({ user: req.session.user || null });
 });
 
-// GET Products (Public)
-app.get('/api/products', (req, res) => {
+// GET Products
+app.get(['/products', '/api/products'], async (req, res) => {
+    await db.read();
     const { search, category } = req.query;
-    let products = db.get('products').value();
+    let products = [...db.data.products];
 
     if (search) {
         const lowerSearch = search.toLowerCase();
@@ -136,38 +128,70 @@ app.get('/api/products', (req, res) => {
     res.json(products);
 });
 
-// POST Product (Admin Protected)
-app.post('/api/products', isAuthenticatedAdmin, upload.single('image'), (req, res) => {
+// POST Product
+app.post(['/products', '/api/products'], isAuthenticatedAdmin, upload.single('image'), async (req, res) => {
+    await db.read();
     const productData = {
         ...req.body,
         id: Date.now().toString(),
+        price: parseFloat(req.body.price) || 0,
+        stock: parseInt(req.body.stock) || 0,
         image_url: req.file ? `/uploads/${req.file.filename}` : null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
     };
 
-    db.get('products').push(productData).write();
+    db.data.products.push(productData);
+    await db.write();
     res.json({ success: true, id: productData.id });
 });
 
-// PUT Product (Admin Protected)
-app.put('/api/products/:id', isAuthenticatedAdmin, upload.single('image'), (req, res) => {
-    const existing = db.get('products').find({ id: req.params.id }).value();
-    if (!existing) return res.status(404).json({ error: 'Product not found' });
+// PUT Product
+app.put(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, upload.single('image'), async (req, res) => {
+    await db.read();
+    const index = db.data.products.findIndex(p => p.id === req.params.id);
+    if (index === -1) return res.status(404).json({ error: 'Product not found' });
 
-    const updates = { ...req.body, updated_at: new Date().toISOString() };
+    const updates = {
+        ...req.body,
+        price: parseFloat(req.body.price) || 0,
+        stock: parseInt(req.body.stock) || 0,
+        updated_at: new Date().toISOString()
+    };
     if (req.file) {
         updates.image_url = `/uploads/${req.file.filename}`;
     }
 
-    db.get('products').find({ id: req.params.id }).assign(updates).write();
+    db.data.products[index] = { ...db.data.products[index], ...updates };
+    await db.write();
     res.json({ success: true });
 });
 
-// DELETE Product (Admin Protected)
-app.delete('/api/products/:id', isAuthenticatedAdmin, (req, res) => {
-    db.get('products').remove({ id: req.params.id }).write();
+// DELETE Product
+app.delete(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, async (req, res) => {
+    await db.read();
+    db.data.products = db.data.products.filter(p => p.id !== req.params.id);
+    await db.write();
     res.json({ success: true });
+});
+
+app.get(['/api/last-updated', '/last-updated'], async (req, res) => {
+    await db.read();
+    if (db.data.products.length === 0) return res.json({ last_updated: null });
+
+    const latest = db.data.products.reduce((max, p) => {
+        const date = new Date(p.updated_at || p.created_at);
+        return date > max ? date : max;
+    }, new Date(0));
+
+    res.json({ last_updated: latest.toISOString() });
+});
+
+app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
+    await db.read();
+    const product = db.data.products.find(p => p.id === req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    res.json(product);
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
