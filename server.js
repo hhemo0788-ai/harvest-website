@@ -11,9 +11,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Configuration ---
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/harvest_db';
+const MONGODB_URI = process.env.MONGODB_URI; // Removed local fallback
 const PORT = process.env.PORT || 8080;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'harvest-secret-key-2026-stable';
+
+if (!MONGODB_URI) {
+    console.error('❌ CRITICAL ERROR: MONGODB_URI environment variable is missing.');
+    console.error('Please add your MongoDB Atlas connection string to Railway Environment Variables.');
+    process.exit(1);
+}
 
 // --- Mongoose Schemas & Models ---
 const ProductSchema = new mongoose.Schema({
