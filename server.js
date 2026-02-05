@@ -10,18 +10,12 @@ import mongoose from 'mongoose';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- MongoDB Configuration ---
+// --- Configuration ---
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/harvest_db';
+const PORT = process.env.PORT || 8080;
+const SESSION_SECRET = process.env.SESSION_SECRET || 'harvest-secret-key-2026-stable';
 
-mongoose.connect(MONGODB_URI)
-    .then(() => console.log('Connected to MongoDB ✅'))
-    .catch(err => {
-        console.error('MongoDB connection error ❌:', err);
-        console.log('Please ensure MongoDB is running or MONGODB_URI is correctly set.');
-    });
-
-// --- Mongoose Schemas ---
-
+// --- Mongoose Schemas & Models ---
 const ProductSchema = new mongoose.Schema({
     name: { type: String, required: true },
     category: String,
@@ -41,7 +35,6 @@ const ProductSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
-// Map _id to id for frontend compatibility
 ProductSchema.virtual('id').get(function () {
     return this._id.toHexString();
 });
@@ -61,31 +54,15 @@ const Product = mongoose.model('Product', ProductSchema);
 const Admin = mongoose.model('Admin', AdminSchema);
 const Setting = mongoose.model('Setting', SettingSchema);
 
-// --- Admin Initialization ---
-async function initAdmin() {
-    try {
-        const admin = await Admin.findOne({ username: 'admin' });
-        if (!admin) {
-            await Admin.create({ username: 'admin', password: '1234', role: 'admin' });
-            console.log('Default admin created (admin/1234).');
-        } else {
-            // Keep password in sync with request
-            admin.password = '1234';
-            await admin.save();
-        }
-    } catch (err) {
-        console.error('Error initializing admin:', err.message);
-    }
-}
-// Init admin only after connection attempt (Mongoose handles buffering)
-initAdmin();
-
-// --- Server Setup ---
+// --- Express App Setup ---
 const app = express();
-const PORT = process.env.PORT || 8080;
 
-app.set('trust proxy', 1);
+// Priority 1: Middlewares
+app.set('trust proxy', 1); // Crucial for Railway/Proxies
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
+// Multer Setup
 const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -95,78 +72,71 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
+// Session Management
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'harvest-secret-key-2026',
+    secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 Days
     }
 }));
 
+// --- Middleware: Protection ---
 const isAuthenticatedAdmin = (req, res, next) => {
     if (req.session && req.session.user && req.session.user.role === 'admin') {
         return next();
     }
-    // Check if it's an API request or expects JSON
     if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('json') > -1)) {
-        res.status(401).json({ error: 'Unauthorized' });
-    } else {
-        res.redirect('/login.html');
+        return res.status(401).json({ error: 'Unauthorized' });
     }
+    res.redirect('/login.html');
 };
 
-// Protect the admin.html file directly
-app.get('/admin.html', isAuthenticatedAdmin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
+// --- API Routes (Wrapped in Try/Catch) ---
 
-// Protect all other files in public EXCEPT login.html and static assets if needed
-// For simplicity, we just protect admin.html specifically above.
-app.use(express.static(path.join(__dirname, 'public')));
-
-// --- API Routes ---
-
+// Auth
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        // Search in DB
+        if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
+
         const admin = await Admin.findOne({ username, password });
         if (admin) {
-            req.session.user = { username: admin.username, role: admin.role };
+            req.session.user = { username: admin.username, role: admin.role, id: admin._id };
             req.session.save((err) => {
-                if (err) return res.status(500).json({ error: 'Session save error' });
-                res.json({ success: true, role: admin.role });
+                if (err) return res.status(500).json({ error: 'Session save failure' });
+                res.json({ success: true });
             });
         } else {
             res.status(401).json({ error: 'Invalid credentials' });
         }
     } catch (err) {
-        res.status(500).json({ error: 'Internal server error' });
+        console.error('Login Error:', err);
+        res.status(500).json({ error: 'Auth service unavailable' });
     }
 });
 
 app.post('/api/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ success: true });
+    req.session.destroy(() => {
+        res.json({ success: true });
+    });
 });
 
 app.get('/api/session', (req, res) => {
-    res.json({ user: req.session.user || null });
+    res.json({ user: req.session?.user || null });
 });
 
+// Products: Collection-based
 app.get(['/products', '/api/products'], async (req, res) => {
     try {
         const { search, category } = req.query;
-        let query = {};
+        let filter = {};
 
         if (search) {
-            query.$or = [
+            filter.$or = [
                 { name: { $regex: search, $options: 'i' } },
                 { active_ingredient: { $regex: search, $options: 'i' } }
             ];
@@ -174,73 +144,79 @@ app.get(['/products', '/api/products'], async (req, res) => {
 
         if (category && category !== 'All') {
             if (category === 'Pesticides') {
-                query.category = { $ne: 'Fertilizers' };
+                filter.category = { $ne: 'Fertilizers' };
             } else if (category === 'Fertilizers') {
-                query.category = { $regex: 'Fertilizers', $options: 'i' };
+                filter.category = { $regex: 'Fertilizers', $options: 'i' };
             } else {
-                query.category = category;
+                filter.category = category;
             }
         }
 
-        const products = await Product.find(query).sort({ updated_at: -1 });
-        res.json(products);
+        const data = await Product.find(filter).sort({ updated_at: -1 }).lean();
+        res.json(data);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Fetch Products Error:', err);
+        res.status(500).json({ error: 'Database read error' });
     }
 });
 
 app.post(['/products', '/api/products'], isAuthenticatedAdmin, upload.single('image'), async (req, res) => {
     try {
+        if (!req.body.name) return res.status(400).json({ error: 'Product name is required' });
+
         const productData = {
             ...req.body,
-            price: parseFloat(req.body.price) || 0,
-            stock: parseInt(req.body.stock) || 0,
+            price: Number(req.body.price) || 0,
+            stock: Number(req.body.stock) || 0,
             image_url: req.file ? `/uploads/${req.file.filename}` : null
         };
-        const product = await Product.create(productData);
-        res.json({ success: true, id: product._id });
+
+        const newProduct = await Product.create(productData);
+        res.status(201).json({ success: true, id: newProduct._id });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Create Product Error:', err);
+        res.status(500).json({ error: 'Failed to save product' });
     }
 });
 
 app.put(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, upload.single('image'), async (req, res) => {
     try {
-        const updates = {
+        const updateData = {
             ...req.body,
-            price: parseFloat(req.body.price) || 0,
-            stock: parseInt(req.body.stock) || 0,
+            price: Number(req.body.price) || 0,
+            stock: Number(req.body.stock) || 0,
             updated_at: Date.now()
         };
-        if (req.file) updates.image_url = `/uploads/${req.file.filename}`;
+        if (req.file) updateData.image_url = `/uploads/${req.file.filename}`;
 
-        const product = await Product.findByIdAndUpdate(req.params.id, updates);
-        if (!product) return res.status(404).json({ error: 'Product not found' });
+        const result = await Product.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        if (!result) return res.status(404).json({ error: 'Product not found' });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Update Product Error:', err);
+        res.status(500).json({ error: 'Update failed' });
     }
 });
 
 app.delete(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, async (req, res) => {
     try {
-        const product = await Product.findByIdAndDelete(req.params.id);
-        if (product && product.image_url) {
-            const imagePath = path.join(__dirname, 'public', product.image_url);
-            if (fs.existsSync(imagePath)) {
-                try { fs.unlinkSync(imagePath); } catch (e) { }
-            }
+        const item = await Product.findByIdAndDelete(req.params.id);
+        if (item && item.image_url) {
+            const fullPath = path.join(__dirname, 'public', item.image_url);
+            if (fs.existsSync(fullPath)) fs.unlink(fullPath, () => { });
         }
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Delete Product Error:', err);
+        res.status(500).json({ error: 'Delete failed' });
     }
 });
 
+// Settings & Metadata
 app.get(['/api/last-updated', '/last-updated'], async (req, res) => {
     try {
-        const latest = await Product.findOne().sort({ updated_at: -1 });
-        res.json({ last_updated: latest ? latest.updated_at : null });
+        const doc = await Product.findOne().sort({ updated_at: -1 }).select('updated_at').lean();
+        res.json({ last_updated: doc ? doc.updated_at : null });
     } catch (err) {
         res.json({ last_updated: null });
     }
@@ -248,46 +224,76 @@ app.get(['/api/last-updated', '/last-updated'], async (req, res) => {
 
 app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id);
-        if (!product) return res.status(404).json({ error: 'Product not found' });
-        res.json(product);
+        const doc = await Product.findById(req.params.id).lean();
+        if (!doc) return res.status(404).json({ error: 'Not found' });
+        res.json(doc);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: 'Query failed' });
     }
 });
 
+// PDF Stock Balance
 app.post('/api/upload-stock-pdf', isAuthenticatedAdmin, upload.single('pdf'), async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+        if (!req.file) return res.status(400).json({ error: 'No PDF provided' });
 
-        const currentPdf = await Setting.findOne({ key: 'stock_pdf_url' });
-        if (currentPdf && currentPdf.value) {
-            const oldPath = path.join(__dirname, 'public', currentPdf.value);
-            if (fs.existsSync(oldPath)) {
-                try { fs.unlinkSync(oldPath); } catch (e) { }
-            }
+        const setting = await Setting.findOne({ key: 'stock_pdf_url' });
+        if (setting?.value) {
+            const oldPath = path.join(__dirname, 'public', setting.value);
+            if (fs.existsSync(oldPath)) fs.unlink(oldPath, () => { });
         }
 
-        const pdfUrl = `/uploads/${req.file.filename}`;
-        await Setting.findOneAndUpdate(
-            { key: 'stock_pdf_url' },
-            { value: pdfUrl },
-            { upsert: true }
-        );
-
-        res.json({ success: true, url: pdfUrl });
+        const url = `/uploads/${req.file.filename}`;
+        await Setting.findOneAndUpdate({ key: 'stock_pdf_url' }, { value: url }, { upsert: true });
+        res.json({ success: true, url });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('PDF Upload Error:', err);
+        res.status(500).json({ error: 'PDF upload failed' });
     }
 });
 
 app.get('/api/stock-pdf', async (req, res) => {
     try {
-        const pdf = await Setting.findOne({ key: 'stock_pdf_url' });
-        res.json({ url: pdf ? pdf.value : null });
+        const doc = await Setting.findOne({ key: 'stock_pdf_url' }).lean();
+        res.json({ url: doc ? doc.value : null });
     } catch (err) {
         res.json({ url: null });
     }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Static Files & Page Protection
+app.get('/admin.html', isAuthenticatedAdmin, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Server Lifecycle & DB Connection ---
+
+async function startServer() {
+    console.log('Connecting to MongoDB...');
+    try {
+        await mongoose.connect(MONGODB_URI, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        });
+        console.log('MongoDB Connected successfully! ✅');
+
+        // Verify/Setup Admin
+        const hasAdmin = await Admin.findOne({ username: 'admin' });
+        if (!hasAdmin) {
+            await Admin.create({ username: 'admin', password: '1234', role: 'admin' });
+            console.log('Default admin initialized (admin/1234)');
+        }
+
+        app.listen(PORT, () => {
+            console.log(`Server is running on port ${PORT} 🚀`);
+        });
+
+    } catch (err) {
+        console.error('CRITICAL ERROR: Failed to start application ❌');
+        console.error(err);
+        process.exit(1);
+    }
+}
+
+startServer();
