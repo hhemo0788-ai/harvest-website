@@ -91,16 +91,25 @@ async function fetchStockPdf() {
         const res = await fetch('/api/stock-pdf');
         const data = await res.json();
         const link = document.getElementById('stockBalanceLink');
-        if (data.url) {
-            link.href = data.url;
-            link.style.display = 'inline-block';
-        } else {
-            link.style.opacity = '0.5';
-            link.onclick = (e) => {
-                e.preventDefault();
-                alert('عذراً، لم يتم رفع ملف رصيد المخزن بعد.');
-            };
-        }
+        const linkMobile = document.getElementById('stockBalanceLinkMobile');
+
+        const updateLink = (el) => {
+            if (data.url) {
+                el.href = data.url;
+                el.style.opacity = '1';
+                el.onclick = null;
+            } else {
+                el.style.opacity = '0.5';
+                el.onclick = (e) => {
+                    e.preventDefault();
+                    alert('عذراً، لم يتم رفع ملف رصيد المخزن بعد.');
+                };
+            }
+        };
+
+        if (link) updateLink(link);
+        if (linkMobile) updateLink(linkMobile);
+
     } catch (err) {
         console.error('Failed to fetch stock PDF', err);
     }

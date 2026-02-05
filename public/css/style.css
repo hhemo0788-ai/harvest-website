@@ -493,8 +493,34 @@ td {
     color: var(--text-dark);
 }
 
-/* Responsive */
+/* Mobile Nav Adjustments */
+.mobile-nav-tools {
+    display: none;
+    align-items: center;
+}
+
+.stock-balance-mobile {
+    font-size: 1.4rem;
+    padding: 0.5rem;
+    background: #f3f4f6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-sm);
+}
+
 @media (max-width: 768px) {
+    .mobile-nav-tools {
+        display: flex;
+    }
+
+    .logo {
+        font-size: 1.1rem;
+    }
+
     .nav-links {
         display: none;
         /* Simplification for demo */
