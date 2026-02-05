@@ -5,6 +5,7 @@ const categoryFilter = document.getElementById('categoryFilter');
 document.addEventListener('DOMContentLoaded', () => {
     fetchProducts();
     fetchLastUpdated();
+    fetchStockPdf();
 });
 
 async function fetchLastUpdated() {
@@ -133,4 +134,24 @@ function renderProducts(products) {
 
         productGrid.appendChild(card);
     });
+}
+async function fetchStockPdf() {
+    try {
+        const res = await fetch('/api/stock-pdf');
+        const data = await res.json();
+        const link = document.getElementById('stockBalanceLink');
+        if (data.url) {
+            link.href = data.url;
+            link.style.display = 'inline-block';
+        } else {
+            // If no PDF uploaded, we might want to hide it or keep it as # 
+            link.style.opacity = '0.5';
+            link.onclick = (e) => {
+                e.preventDefault();
+                alert('عذراً، لم يتم رفع ملف رصيد المخزن بعد.');
+            };
+        }
+    } catch (err) {
+        console.error('Failed to fetch stock PDF', err);
+    }
 }

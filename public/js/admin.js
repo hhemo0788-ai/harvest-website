@@ -26,6 +26,9 @@ productForm.addEventListener('submit', handleFormSubmit);
 showLowStock.addEventListener('change', renderTable);
 showExpired.addEventListener('change', renderTable);
 
+// PDF Upload Event
+document.getElementById('uploadStockPdfBtn').addEventListener('click', handlePdfUpload);
+
 // Category Mapping for Display
 const categoryMap = {
     'Insecticide': 'مبيد حشري',
@@ -284,3 +287,30 @@ window.deleteProduct = async (id) => {
         alert('Failed to delete product');
     }
 };
+async function handlePdfUpload() {
+    const fileInput = document.getElementById('stockPdfInput');
+    if (fileInput.files.length === 0) {
+        alert('يرجى اختيار ملف PDF أولاً');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('pdf', fileInput.files[0]);
+
+    try {
+        const res = await fetch('/api/upload-stock-pdf', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (res.ok) {
+            alert('تم رفع ملف رصيد المخزن بنجاح ✅');
+            fileInput.value = '';
+        } else {
+            const data = await res.json();
+            alert('خطأ في الرفع: ' + (data.error || 'فشل الرفع'));
+        }
+    } catch (err) {
+        alert('حدث خطأ في الاتصال بالسيرفر');
+    }
+}

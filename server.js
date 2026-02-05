@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // LowDB Setup
-const defaultData = { products: [], admins: [] };
+const defaultData = { products: [], admins: [], settings: { stock_pdf_url: null } };
 const db = await JSONFilePreset(path.join(__dirname, 'data', 'db.json'), defaultData);
 
 // Ensure hardcoded admin exists in DB
@@ -192,6 +192,28 @@ app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
     const product = db.data.products.find(p => p.id === req.params.id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
     res.json(product);
+});
+
+// --- Stock PDF Routes ---
+
+// Upload Stock PDF (Admin)
+app.post('/api/upload-stock-pdf', isAuthenticatedAdmin, upload.single('pdf'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    await db.read();
+    if (!db.data.settings) db.data.settings = { stock_pdf_url: null };
+
+    const pdfUrl = `/uploads/${req.file.filename}`;
+    db.data.settings.stock_pdf_url = pdfUrl;
+    await db.write();
+
+    res.json({ success: true, url: pdfUrl });
+});
+
+// Get Stock PDF (Public)
+app.get('/api/stock-pdf', async (req, res) => {
+    await db.read();
+    res.json({ url: db.data.settings ? db.data.settings.stock_pdf_url : null });
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

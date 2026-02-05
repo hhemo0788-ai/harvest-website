@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         document.getElementById('product-details-container').innerHTML = '<p>Product not found.</p>';
     }
+    fetchStockPdf();
 });
 
 async function fetchProductDetails(id) {
@@ -83,5 +84,24 @@ function renderProductDetails(product) {
         stockEl.innerHTML = `<span style="color: var(--accent-color);">مخزون منخفض (${product.stock} ${unit} متبقي)</span>`;
     } else {
         stockEl.innerHTML = `<span style="color: var(--danger-color);">نفذت الكمية</span>`;
+    }
+}
+async function fetchStockPdf() {
+    try {
+        const res = await fetch('/api/stock-pdf');
+        const data = await res.json();
+        const link = document.getElementById('stockBalanceLink');
+        if (data.url) {
+            link.href = data.url;
+            link.style.display = 'inline-block';
+        } else {
+            link.style.opacity = '0.5';
+            link.onclick = (e) => {
+                e.preventDefault();
+                alert('عذراً، لم يتم رفع ملف رصيد المخزن بعد.');
+            };
+        }
+    } catch (err) {
+        console.error('Failed to fetch stock PDF', err);
     }
 }

@@ -32,7 +32,17 @@
                 <div>
                     <a href="index.html" target="_blank" class="btn"
                         style="border: 1px solid #d1d5db; margin-left: 1rem;">عرض الموقع</a>
-                    <button id="addProductBtn" class="btn btn-primary">+ إضافة منتج جديد</button>
+                    <button id="addProductBtn" class="btn btn-primary" style="margin-left: 1rem;">+ إضافة منتج
+                        جديد</button>
+
+                    <!-- Stock PDF Upload -->
+                    <div style="display: inline-block; padding: 0.5rem; background: #f3f4f6; border-radius: 8px;">
+                        <label for="stockPdfInput" style="font-size: 0.85rem; cursor: pointer; color: #374151;">📄 تحديث
+                            رصيد المخزن (PDF):</label>
+                        <input type="file" id="stockPdfInput" accept=".pdf" style="font-size: 0.8rem; width: 180px;">
+                        <button id="uploadStockPdfBtn" class="btn"
+                            style="padding: 0.3rem 0.8rem; background: #10b981; color: white; font-size: 0.8rem;">رفع</button>
+                    </div>
                 </div>
             </header>
 
