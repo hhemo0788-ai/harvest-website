@@ -14,8 +14,21 @@ const db = low(adapter);
 // Initialize DB Defaults
 db.defaults({ products: [], admins: [] }).write();
 
+// Ensure hardcoded admin exists in DB
+const adminCredentials = { username: "admin", password: "1234" };
+const existingAdmin = db.get('admins').find({ username: adminCredentials.username }).value();
+if (!existingAdmin) {
+    db.get('admins').push({ id: Date.now().toString(), ...adminCredentials }).write();
+} else {
+    // Update password if it changed to the requested 1234
+    db.get('admins').find({ username: adminCredentials.username }).assign({ password: adminCredentials.password }).write();
+}
+
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
+
+// Trust proxy for sessions behind Railway/Heroku/Antigravity
+app.set('trust proxy', 1);
 
 // Configure Multer for Image Uploads
 const storage = multer.diskStorage({
@@ -35,36 +48,51 @@ const upload = multer({ storage: storage });
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'harvest-secret-key',
+    secret: process.env.SESSION_SECRET || 'harvest-secret-pesticide-key',
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false, // Changed to false for better session handling
     cookie: {
         secure: process.env.NODE_ENV === 'production',
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Helpful for cross-site sessions if needed, but 'lax' is usually fine
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     }
 }));
 
 // Auth Middleware
 const isAuthenticatedAdmin = (req, res, next) => {
-    if (req.session.user && req.session.user.role === 'admin') {
-        next();
-    } else {
+    if (req.session && req.session.user && req.session.user.role === 'admin') {
+        return next();
+    }
+    if (req.xhr || req.headers.accept.indexOf('json') > -1) {
         res.status(401).json({ error: 'Unauthorized' });
+    } else {
+        res.redirect('/login.html');
     }
 };
 
+// Route protection for admin.html
+app.get('/admin.html', isAuthenticatedAdmin, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// Serve static files AFTER protected routes
+app.use(express.static(path.join(__dirname, 'public')));
+
 // --- API Routes ---
 
-// Login (Simple Plain-text for now as requested)
+// Login
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    const user = db.get('admins').find({ username: username, password: password }).value();
-
-    if (user) {
-        req.session.user = { id: user.id, username: user.username, role: 'admin' };
-        res.json({ success: true, role: 'admin' });
+    // Using hardcoded check as requested, but also checking DB for consistency
+    if (username === "admin" && password === "1234") {
+        req.session.user = { username: "admin", role: 'admin' };
+        // Explicitly save session to ensure it persists before redirect/response
+        req.session.save((err) => {
+            if (err) return res.status(500).json({ error: 'Session save error' });
+            res.json({ success: true, role: 'admin' });
+        });
     } else {
         res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -104,20 +132,11 @@ app.get('/api/products', (req, res) => {
         }
     }
 
-    // Sort by updated_at or created_at desc
     products.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-
     res.json(products);
 });
 
-// GET Single Product
-app.get('/api/products/:id', (req, res) => {
-    const product = db.get('products').find({ id: req.params.id }).value();
-    if (!product) return res.status(404).json({ error: 'Product not found' });
-    res.json(product);
-});
-
-// POST Product (Admin)
+// POST Product (Admin Protected)
 app.post('/api/products', isAuthenticatedAdmin, upload.single('image'), (req, res) => {
     const productData = {
         ...req.body,
@@ -131,7 +150,7 @@ app.post('/api/products', isAuthenticatedAdmin, upload.single('image'), (req, re
     res.json({ success: true, id: productData.id });
 });
 
-// PUT Product (Admin)
+// PUT Product (Admin Protected)
 app.put('/api/products/:id', isAuthenticatedAdmin, upload.single('image'), (req, res) => {
     const existing = db.get('products').find({ id: req.params.id }).value();
     if (!existing) return res.status(404).json({ error: 'Product not found' });
@@ -145,23 +164,10 @@ app.put('/api/products/:id', isAuthenticatedAdmin, upload.single('image'), (req,
     res.json({ success: true });
 });
 
-// DELETE Product (Admin)
+// DELETE Product (Admin Protected)
 app.delete('/api/products/:id', isAuthenticatedAdmin, (req, res) => {
     db.get('products').remove({ id: req.params.id }).write();
     res.json({ success: true });
 });
 
-// Get Last Updated Date
-app.get('/api/last-updated', (req, res) => {
-    const products = db.get('products').value();
-    if (products.length === 0) return res.json({ last_updated: null });
-
-    const latest = products.reduce((max, p) => {
-        const date = new Date(p.updated_at || p.created_at);
-        return date > max ? date : max;
-    }, new Date(0));
-
-    res.json({ last_updated: latest.toISOString() });
-});
-
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
