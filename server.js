@@ -15,7 +15,10 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/harves
 
 mongoose.connect(MONGODB_URI)
     .then(() => console.log('Connected to MongoDB ✅'))
-    .catch(err => console.error('MongoDB connection error ❌:', err));
+    .catch(err => {
+        console.error('MongoDB connection error ❌:', err);
+        console.log('Please ensure MongoDB is running or MONGODB_URI is correctly set.');
+    });
 
 // --- Mongoose Schemas ---
 
@@ -33,6 +36,14 @@ const ProductSchema = new mongoose.Schema({
     image_url: String,
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now }
+}, {
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
+
+// Map _id to id for frontend compatibility
+ProductSchema.virtual('id').get(function () {
+    return this._id.toHexString();
 });
 
 const AdminSchema = new mongoose.Schema({
@@ -52,15 +63,21 @@ const Setting = mongoose.model('Setting', SettingSchema);
 
 // --- Admin Initialization ---
 async function initAdmin() {
-    const admin = await Admin.findOne({ username: 'admin' });
-    if (!admin) {
-        await Admin.create({ username: 'admin', password: '1234', role: 'admin' });
-        console.log('Default admin created.');
-    } else {
-        admin.password = '1234'; // Ensure password is correct as per user request
-        await admin.save();
+    try {
+        const admin = await Admin.findOne({ username: 'admin' });
+        if (!admin) {
+            await Admin.create({ username: 'admin', password: '1234', role: 'admin' });
+            console.log('Default admin created (admin/1234).');
+        } else {
+            // Keep password in sync with request
+            admin.password = '1234';
+            await admin.save();
+        }
+    } catch (err) {
+        console.error('Error initializing admin:', err.message);
     }
 }
+// Init admin only after connection attempt (Mongoose handles buffering)
 initAdmin();
 
 // --- Server Setup ---
@@ -96,6 +113,7 @@ const isAuthenticatedAdmin = (req, res, next) => {
     if (req.session && req.session.user && req.session.user.role === 'admin') {
         return next();
     }
+    // Check if it's an API request or expects JSON
     if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('json') > -1)) {
         res.status(401).json({ error: 'Unauthorized' });
     } else {
@@ -103,26 +121,33 @@ const isAuthenticatedAdmin = (req, res, next) => {
     }
 };
 
+// Protect the admin.html file directly
 app.get('/admin.html', isAuthenticatedAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
+// Protect all other files in public EXCEPT login.html and static assets if needed
+// For simplicity, we just protect admin.html specifically above.
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- API Routes ---
 
-// Auth
 app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    const admin = await Admin.findOne({ username, password });
-    if (admin) {
-        req.session.user = { username: admin.username, role: admin.role };
-        req.session.save((err) => {
-            if (err) return res.status(500).json({ error: 'Session save error' });
-            res.json({ success: true, role: admin.role });
-        });
-    } else {
-        res.status(401).json({ error: 'Invalid credentials' });
+    try {
+        const { username, password } = req.body;
+        // Search in DB
+        const admin = await Admin.findOne({ username, password });
+        if (admin) {
+            req.session.user = { username: admin.username, role: admin.role };
+            req.session.save((err) => {
+                if (err) return res.status(500).json({ error: 'Session save error' });
+                res.json({ success: true, role: admin.role });
+            });
+        } else {
+            res.status(401).json({ error: 'Invalid credentials' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -135,7 +160,6 @@ app.get('/api/session', (req, res) => {
     res.json({ user: req.session.user || null });
 });
 
-// Products
 app.get(['/products', '/api/products'], async (req, res) => {
     try {
         const { search, category } = req.query;
@@ -190,7 +214,8 @@ app.put(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, upload.sin
         };
         if (req.file) updates.image_url = `/uploads/${req.file.filename}`;
 
-        await Product.findByIdAndUpdate(req.params.id, updates);
+        const product = await Product.findByIdAndUpdate(req.params.id, updates);
+        if (!product) return res.status(404).json({ error: 'Product not found' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -202,7 +227,9 @@ app.delete(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, async (
         const product = await Product.findByIdAndDelete(req.params.id);
         if (product && product.image_url) {
             const imagePath = path.join(__dirname, 'public', product.image_url);
-            if (fs.existsSync(imagePath)) fs.unlink(imagePath, () => { });
+            if (fs.existsSync(imagePath)) {
+                try { fs.unlinkSync(imagePath); } catch (e) { }
+            }
         }
         res.json({ success: true });
     } catch (err) {
@@ -211,8 +238,12 @@ app.delete(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, async (
 });
 
 app.get(['/api/last-updated', '/last-updated'], async (req, res) => {
-    const latest = await Product.findOne().sort({ updated_at: -1 });
-    res.json({ last_updated: latest ? latest.updated_at : null });
+    try {
+        const latest = await Product.findOne().sort({ updated_at: -1 });
+        res.json({ last_updated: latest ? latest.updated_at : null });
+    } catch (err) {
+        res.json({ last_updated: null });
+    }
 });
 
 app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
@@ -225,31 +256,38 @@ app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
     }
 });
 
-// Stock PDF
 app.post('/api/upload-stock-pdf', isAuthenticatedAdmin, upload.single('pdf'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const currentPdf = await Setting.findOne({ key: 'stock_pdf_url' });
-    if (currentPdf && currentPdf.value) {
-        const oldPath = path.join(__dirname, 'public', currentPdf.value);
-        if (fs.existsSync(oldPath)) {
-            try { fs.unlinkSync(oldPath); } catch (e) { }
+        const currentPdf = await Setting.findOne({ key: 'stock_pdf_url' });
+        if (currentPdf && currentPdf.value) {
+            const oldPath = path.join(__dirname, 'public', currentPdf.value);
+            if (fs.existsSync(oldPath)) {
+                try { fs.unlinkSync(oldPath); } catch (e) { }
+            }
         }
+
+        const pdfUrl = `/uploads/${req.file.filename}`;
+        await Setting.findOneAndUpdate(
+            { key: 'stock_pdf_url' },
+            { value: pdfUrl },
+            { upsert: true }
+        );
+
+        res.json({ success: true, url: pdfUrl });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-
-    const pdfUrl = `/uploads/${req.file.filename}`;
-    await Setting.findOneAndUpdate(
-        { key: 'stock_pdf_url' },
-        { value: pdfUrl },
-        { upsert: true }
-    );
-
-    res.json({ success: true, url: pdfUrl });
 });
 
 app.get('/api/stock-pdf', async (req, res) => {
-    const pdf = await Setting.findOne({ key: 'stock_pdf_url' });
-    res.json({ url: pdf ? pdf.value : null });
+    try {
+        const pdf = await Setting.findOne({ key: 'stock_pdf_url' });
+        res.json({ url: pdf ? pdf.value : null });
+    } catch (err) {
+        res.json({ url: null });
+    }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
