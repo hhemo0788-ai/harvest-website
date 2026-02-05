@@ -5,72 +5,82 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import fs from 'fs';
-import { JSONFilePreset } from 'lowdb/node';
+import mongoose from 'mongoose';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- Persistent Storage Configuration ---
-// On platforms like Railway/Antigravity, we can use an environment variable to point to a persistent volume.
-const DATA_DIR = process.env.DATA_VOL_PATH || path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'db.json');
-const UPLOADS_DIR = process.env.UPLOADS_VOL_PATH || path.join(__dirname, 'public', 'uploads');
+// --- MongoDB Configuration ---
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/harvest_db';
 
-// Ensure directories exist
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+mongoose.connect(MONGODB_URI)
+    .then(() => console.log('Connected to MongoDB ✅'))
+    .catch(err => console.error('MongoDB connection error ❌:', err));
 
-// Initial Database Structure
-const defaultData = {
-    products: [],
-    admins: [],
-    settings: { stock_pdf_url: null }
-};
+// --- Mongoose Schemas ---
 
-// Initialize LowDB with persistent path
-const db = await JSONFilePreset(DB_PATH, defaultData);
+const ProductSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    category: String,
+    price: { type: Number, default: 0 },
+    stock: { type: Number, default: 0 },
+    active_ingredient: String,
+    package_size: String,
+    carton_size: String,
+    origin: String,
+    expiry: Date,
+    description: String,
+    image_url: String,
+    created_at: { type: Date, default: Date.now },
+    updated_at: { type: Date, default: Date.now }
+});
 
-// Ensure the data structure is initialized even if file was empty
-await db.read();
-db.data ||= defaultData;
-db.data.products ||= [];
-db.data.admins ||= [];
-db.data.settings ||= { stock_pdf_url: null };
-await db.write();
+const AdminSchema = new mongoose.Schema({
+    username: { type: String, unique: true, required: true },
+    password: { type: String, required: true },
+    role: { type: String, default: 'admin' }
+});
 
-// Ensure hardcoded admin exists for recovery/initial setup
-const adminCredentials = { username: "admin", password: "1234" };
-const existingAdmin = db.data.admins.find(a => a.username === adminCredentials.username);
-if (!existingAdmin) {
-    db.data.admins.push({ id: Date.now().toString(), ...adminCredentials, role: 'admin' });
-    await db.write();
-} else {
-    existingAdmin.password = adminCredentials.password;
-    existingAdmin.role = 'admin';
-    await db.write();
+const SettingSchema = new mongoose.Schema({
+    key: { type: String, unique: true },
+    value: mongoose.Schema.Types.Mixed
+});
+
+const Product = mongoose.model('Product', ProductSchema);
+const Admin = mongoose.model('Admin', AdminSchema);
+const Setting = mongoose.model('Setting', SettingSchema);
+
+// --- Admin Initialization ---
+async function initAdmin() {
+    const admin = await Admin.findOne({ username: 'admin' });
+    if (!admin) {
+        await Admin.create({ username: 'admin', password: '1234', role: 'admin' });
+        console.log('Default admin created.');
+    } else {
+        admin.password = '1234'; // Ensure password is correct as per user request
+        await admin.save();
+    }
 }
+initAdmin();
 
+// --- Server Setup ---
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Trust proxy is essential for secure cookies on cloud platforms
 app.set('trust proxy', 1);
 
-// Multer Storage Configuration
+const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, UPLOADS_DIR);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
-    }
+    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage: storage });
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Session Configuration (Persistent via Cookie settings and Proxy trust)
 app.use(session({
     secret: process.env.SESSION_SECRET || 'harvest-secret-key-2026',
     resave: false,
@@ -78,11 +88,9 @@ app.use(session({
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 Days
+        maxAge: 7 * 24 * 60 * 60 * 1000
     }
 }));
-
-// --- Middleware ---
 
 const isAuthenticatedAdmin = (req, res, next) => {
     if (req.session && req.session.user && req.session.user.role === 'admin') {
@@ -95,24 +103,23 @@ const isAuthenticatedAdmin = (req, res, next) => {
     }
 };
 
-// --- Routes ---
-
 app.get('/admin.html', isAuthenticatedAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// Serve static files (including uploads from persistent directory)
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(UPLOADS_DIR));
 
-// Auth API
-app.post('/api/login', (req, res) => {
+// --- API Routes ---
+
+// Auth
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
-    if (username === "admin" && password === "1234") {
-        req.session.user = { username: "admin", role: 'admin' };
+    const admin = await Admin.findOne({ username, password });
+    if (admin) {
+        req.session.user = { username: admin.username, role: admin.role };
         req.session.save((err) => {
             if (err) return res.status(500).json({ error: 'Session save error' });
-            res.json({ success: true, role: 'admin' });
+            res.json({ success: true, role: admin.role });
         });
     } else {
         res.status(401).json({ error: 'Invalid credentials' });
@@ -128,139 +135,121 @@ app.get('/api/session', (req, res) => {
     res.json({ user: req.session.user || null });
 });
 
-// --- Product Management (Persistent Operations) ---
-
-// GET Products
+// Products
 app.get(['/products', '/api/products'], async (req, res) => {
-    await db.read();
-    const { search, category } = req.query;
-    let products = [...db.data.products];
+    try {
+        const { search, category } = req.query;
+        let query = {};
 
-    if (search) {
-        const lowerSearch = search.toLowerCase();
-        products = products.filter(p =>
-            (p.name && p.name.toLowerCase().includes(lowerSearch)) ||
-            (p.active_ingredient && p.active_ingredient.toLowerCase().includes(lowerSearch))
-        );
-    }
-
-    if (category && category !== 'All') {
-        if (category === 'Pesticides') {
-            products = products.filter(p => p.category !== 'Fertilizers');
-        } else if (category === 'Fertilizers') {
-            products = products.filter(p => p.category && p.category.includes('Fertilizers'));
-        } else {
-            products = products.filter(p => p.category === category);
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { active_ingredient: { $regex: search, $options: 'i' } }
+            ];
         }
-    }
 
-    products.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-    res.json(products);
+        if (category && category !== 'All') {
+            if (category === 'Pesticides') {
+                query.category = { $ne: 'Fertilizers' };
+            } else if (category === 'Fertilizers') {
+                query.category = { $regex: 'Fertilizers', $options: 'i' };
+            } else {
+                query.category = category;
+            }
+        }
+
+        const products = await Product.find(query).sort({ updated_at: -1 });
+        res.json(products);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// POST Product (Add)
 app.post(['/products', '/api/products'], isAuthenticatedAdmin, upload.single('image'), async (req, res) => {
-    await db.read();
-    const productData = {
-        ...req.body,
-        id: Date.now().toString(),
-        price: parseFloat(req.body.price) || 0,
-        stock: parseInt(req.body.stock) || 0,
-        image_url: req.file ? `/uploads/${req.file.filename}` : (req.body.image_url || null),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-    };
-
-    db.data.products.push(productData);
-    await db.write();
-    res.json({ success: true, id: productData.id });
+    try {
+        const productData = {
+            ...req.body,
+            price: parseFloat(req.body.price) || 0,
+            stock: parseInt(req.body.stock) || 0,
+            image_url: req.file ? `/uploads/${req.file.filename}` : null
+        };
+        const product = await Product.create(productData);
+        res.json({ success: true, id: product._id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// PUT Product (Update)
 app.put(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, upload.single('image'), async (req, res) => {
-    await db.read();
-    const index = db.data.products.findIndex(p => p.id === req.params.id);
-    if (index === -1) return res.status(404).json({ error: 'Product not found' });
+    try {
+        const updates = {
+            ...req.body,
+            price: parseFloat(req.body.price) || 0,
+            stock: parseInt(req.body.stock) || 0,
+            updated_at: Date.now()
+        };
+        if (req.file) updates.image_url = `/uploads/${req.file.filename}`;
 
-    const updates = {
-        ...req.body,
-        price: parseFloat(req.body.price) || 0,
-        stock: parseInt(req.body.stock) || 0,
-        updated_at: new Date().toISOString()
-    };
-    if (req.file) {
-        updates.image_url = `/uploads/${req.file.filename}`;
+        await Product.findByIdAndUpdate(req.params.id, updates);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-
-    db.data.products[index] = { ...db.data.products[index], ...updates };
-    await db.write();
-    res.json({ success: true });
 });
 
-// DELETE Product
 app.delete(['/products/:id', '/api/products/:id'], isAuthenticatedAdmin, async (req, res) => {
-    await db.read();
-    const productToDelete = db.data.products.find(p => p.id === req.params.id);
-
-    // Optional: Delete product image from disk to save space
-    if (productToDelete && productToDelete.image_url) {
-        const imagePath = path.join(__dirname, 'public', productToDelete.image_url);
-        if (fs.existsSync(imagePath)) fs.unlink(imagePath, () => { });
+    try {
+        const product = await Product.findByIdAndDelete(req.params.id);
+        if (product && product.image_url) {
+            const imagePath = path.join(__dirname, 'public', product.image_url);
+            if (fs.existsSync(imagePath)) fs.unlink(imagePath, () => { });
+        }
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-
-    db.data.products = db.data.products.filter(p => p.id !== req.params.id);
-    await db.write();
-    res.json({ success: true });
 });
 
-// GET Product Details
-app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
-    await db.read();
-    const product = db.data.products.find(p => p.id === req.params.id);
-    if (!product) return res.status(404).json({ error: 'Product not found' });
-    res.json(product);
-});
-
-// GET Last Updated Date
 app.get(['/api/last-updated', '/last-updated'], async (req, res) => {
-    await db.read();
-    if (!db.data.products || db.data.products.length === 0) return res.json({ last_updated: null });
-
-    const latest = db.data.products.reduce((max, p) => {
-        const date = new Date(p.updated_at || p.created_at);
-        return date > max ? date : max;
-    }, new Date(0));
-
-    res.json({ last_updated: latest.toISOString() });
+    const latest = await Product.findOne().sort({ updated_at: -1 });
+    res.json({ last_updated: latest ? latest.updated_at : null });
 });
 
-// --- Stock PDF Management ---
+app.get(['/products/:id', '/api/products/:id'], async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id);
+        if (!product) return res.status(404).json({ error: 'Product not found' });
+        res.json(product);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
-// Upload Stock PDF
+// Stock PDF
 app.post('/api/upload-stock-pdf', isAuthenticatedAdmin, upload.single('pdf'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    await db.read();
-
-    // Delete old PDF file if it exists
-    if (db.data.settings.stock_pdf_url) {
-        const oldPath = path.join(__dirname, 'public', db.data.settings.stock_pdf_url);
+    const currentPdf = await Setting.findOne({ key: 'stock_pdf_url' });
+    if (currentPdf && currentPdf.value) {
+        const oldPath = path.join(__dirname, 'public', currentPdf.value);
         if (fs.existsSync(oldPath)) {
             try { fs.unlinkSync(oldPath); } catch (e) { }
         }
     }
 
     const pdfUrl = `/uploads/${req.file.filename}`;
-    db.data.settings.stock_pdf_url = pdfUrl;
-    await db.write();
+    await Setting.findOneAndUpdate(
+        { key: 'stock_pdf_url' },
+        { value: pdfUrl },
+        { upsert: true }
+    );
 
     res.json({ success: true, url: pdfUrl });
 });
 
-// Get Stock PDF URL
 app.get('/api/stock-pdf', async (req, res) => {
-    await db.read();
-    res.json({ url: db.data.settings ? db.data.settings.stock_pdf_url : null });
+    const pdf = await Setting.findOne({ key: 'stock_pdf_url' });
+    res.json({ url: pdf ? pdf.value : null });
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
