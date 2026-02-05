@@ -1,0 +1,5 @@
+node_modules
+.env
+harvest_system.db
+public/uploads/*
+!public/uploads/.gitkeep
